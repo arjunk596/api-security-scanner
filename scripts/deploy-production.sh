@@ -73,7 +73,7 @@ wait_healthy() {
   local name="$1"
   local state=""
 
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 60); do
     state="$(docker inspect --format \
       '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
       "$name" 2>/dev/null || true)"
