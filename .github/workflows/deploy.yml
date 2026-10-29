@@ -1,0 +1,133 @@
+name: API Security Scanner CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - .github/workflows/deploy.yml
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to production after checks pass
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-scanner-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backend-build:
+    name: Backend syntax and image build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Check Python syntax
+        run: python3 -m compileall -q backend
+
+      - name: Build production backend image
+        run: |
+          docker build --pull \
+            --file conf/docker/prod/fastapi.docker \
+            --tag api-scanner-backend:ci \
+            .
+
+  frontend-build:
+    name: Frontend production image build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Build production frontend image
+        run: |
+          docker build --pull \
+            --file conf/docker/prod/vite.docker \
+            --tag api-scanner-frontend:ci \
+            .
+
+  deploy-production:
+    name: Deploy to EC2 through Systems Manager
+    needs:
+      - backend-build
+      - frontend-build
+    if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.deploy)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+          role-session-name: api-scanner-deploy-${{ github.run_id }}
+          allowed-account-ids: "975822148065"
+
+      - name: Deploy through Systems Manager
+        env:
+          INSTANCE_ID: i-073df4dd1186c94e6
+        run: |
+          set -euo pipefail
+
+          COMMAND_ID="$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --comment "API scanner deployment ${GITHUB_SHA}" \
+            --timeout-seconds 600 \
+            --parameters '{"commands":["set -euo pipefail","if [ -n \"$(sudo -u ssm-user git -C /home/ssm-user/api-security-scanner status --porcelain)\" ]; then echo WORKTREE_NOT_CLEAN; exit 1; fi","sudo -u ssm-user git -C /home/ssm-user/api-security-scanner fetch --prune origin main","sudo -u ssm-user git -C /home/ssm-user/api-security-scanner reset --hard origin/main","sudo /home/ssm-user/api-security-scanner/scripts/deploy-production.sh"],"executionTimeout":["1800"]}' \
+            --query 'Command.CommandId' \
+            --output text)"
+
+          echo "Systems Manager command ID: ${COMMAND_ID}"
+
+          for attempt in $(seq 1 180); do
+            STATUS="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)"
+
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$INSTANCE_ID" \
+                  --query 'StandardOutputContent' \
+                  --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                echo "Deployment failed: ${STATUS}"
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$INSTANCE_ID" \
+                  --query 'StandardErrorContent' \
+                  --output text || true
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$INSTANCE_ID" \
+                  --query 'StandardOutputContent' \
+                  --output text || true
+                exit 1
+                ;;
+            esac
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for Systems Manager deployment."
+          exit 1
