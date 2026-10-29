@@ -43,6 +43,7 @@ class ScanResponse(BaseModel):
     id: int
     user_id: int
     target_url: str
+    status: str = "completed"
     scan_date: datetime
     created_at: datetime
     test_results: list[TestResultResponse] = []

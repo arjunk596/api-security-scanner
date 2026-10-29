@@ -57,6 +57,13 @@ export const useGetScan = (
     },
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 10,
+    refetchInterval: (query) => {
+      const scanStatus = query.state.data?.status
+
+      return scanStatus === 'queued' || scanStatus === 'running'
+        ? 3000
+        : false
+    },
   })
 }
 
@@ -81,7 +88,7 @@ export const useCreateScan = (): UseMutationResult<
         queryKey: scanQueryKeys.lists(),
       })
 
-      toast.success('Scan completed successfully!')
+      toast.success('Scan queued successfully!')
       void navigate(`/scans/${data.id.toString()}`)
     },
     onError: createApiErrorHandler(SCAN_ERROR_CONTEXTS.CREATE_SCAN),

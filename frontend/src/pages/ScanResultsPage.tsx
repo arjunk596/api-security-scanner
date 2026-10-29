@@ -59,7 +59,20 @@ export const ScanResultsPage = (): React.ReactElement => {
             ← Back to Dashboard
           </Link>
           <h1 className="scan-results__title">Scan Results</h1>
-          <div className="scan-results__metadata">
+          <p
+            className={`scan-results__status scan-results__status--${scan.status}`}
+            role="status"
+            aria-live="polite"
+          >
+            {scan.status === 'queued'
+              ? 'Scan queued. Waiting for a worker to start.'
+              : scan.status === 'running'
+                ? 'Scan in progress. This page refreshes automatically.'
+                : scan.status === 'failed'
+                  ? 'Scan failed. Please check the service logs before retrying.'
+                  : 'Scan completed.'}
+          </p>
+	<div className="scan-results__metadata">
             <div className="scan-results__meta-item">
               <span className="scan-results__meta-label">Target:</span>
               <span className="scan-results__meta-value">{scan.target_url}</span>

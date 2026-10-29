@@ -6,6 +6,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi import (
     APIRouter,
     Depends,
+    HTTPException,
     Request,
     status,
 )
@@ -23,10 +24,50 @@ from schemas.scan_schemas import (
 from schemas.user_schemas import UserResponse
 from services.scan_service import ScanService
 
+from repositories.scan_repository import ScanRepository
+from services.scan_queue import enqueue_scan_job
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 limiter = Limiter(key_func=get_remote_address)
 
+def _create_queued_scan(
+    db: Session,
+    user_id: int,
+    scan_request: ScanRequest,
+) -> ScanResponse:
+    """Create a scan record and enqueue its job."""
+    scan = ScanRepository.create_scan(
+        db=db,
+        user_id=user_id,
+        target_url=str(scan_request.target_url),
+    )
+
+    scan.status = "queued"
+    db.commit()
+    db.refresh(scan)
+    scan_id = scan.id
+
+    try:
+        enqueue_scan_job({
+            "scan_id": scan_id,
+            "user_id": user_id,
+            "scan_request": scan_request.model_dump(mode="json"),
+        })
+    except Exception as exc:
+        db.rollback()
+        failed_scan = ScanRepository.get_by_id(db, scan_id)
+
+        if failed_scan is not None:
+            failed_scan.status = "failed"
+            db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to queue scan job",
+        ) from exc
+
+    db.refresh(scan)
+    return ScanResponse.model_validate(scan)
 
 @router.post(
     "/",
@@ -41,10 +82,13 @@ async def create_scan(
     current_user: UserResponse = Depends(get_current_user),
 ) -> ScanResponse:
     """
-    Create and execute a new security scan
+    Create a scan and enqueue it for background processing.
     """
     return await run_in_threadpool(
-        ScanService.run_scan, db, current_user.id, scan_request
+        _create_queued_scan,
+        db,
+        current_user.id,
+        scan_request,
     )
 
 

@@ -98,6 +98,8 @@ const isValidScan = (data: unknown): data is Scan => {
     typeof obj.id === 'number' &&
     typeof obj.user_id === 'number' &&
     typeof obj.target_url === 'string' &&
+    typeof obj.status === 'string' &&
+    ['queued', 'running', 'completed', 'failed'].includes(obj.status) &&
     typeof obj.scan_date === 'string' &&
     typeof obj.created_at === 'string' &&
     Array.isArray(obj.test_results) &&

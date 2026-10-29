@@ -38,6 +38,12 @@ class Scan(BaseModel):
         String(settings.URL_MAX_LENGTH),
         nullable = False,
     )
+    status = Column(
+        String(20),
+        nullable = False,
+        default = "completed",
+        server_default = "completed",
+    )
     scan_date = Column(
         DateTime(timezone = True),
         default = lambda: datetime.now(UTC),

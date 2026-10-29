@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Database configuration
+    AWS_REGION: str = "ap-south-1"
+    SQS_QUEUE_URL: str = ""
+    REPORTS_BUCKET: str = ""
     DATABASE_URL: str
     POSTGRES_USER: str = "apiuser"
     POSTGRES_PASSWORD: str = "apipass"

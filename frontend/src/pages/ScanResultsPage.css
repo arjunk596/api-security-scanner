@@ -129,3 +129,18 @@
     padding: var(--spacing-md);
   }
 }
+.scan-results__status {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}
+
+.scan-results__status--queued,
+.scan-results__status--running {
+  opacity: 0.85;
+}
+
+.scan-results__status--failed {
+  font-weight: 600;
+}

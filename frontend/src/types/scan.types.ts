@@ -6,6 +6,12 @@
 import type { ScanStatus, ScanTestType, Severity } from '@/config/constants'
 
 export type { ScanTestType, ScanStatus, Severity }
+export type ScanJobStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+
 
 export interface TestResult {
   id: number
@@ -23,6 +29,7 @@ export interface Scan {
   id: number
   user_id: number
   target_url: string
+  status: ScanJobStatus
   scan_date: string
   created_at: string
   test_results: TestResult[]

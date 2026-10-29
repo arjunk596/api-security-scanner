@@ -19,6 +19,7 @@ from scanners.sqli_scanner import SQLiScanner
 from scanners.rate_limit_scanner import RateLimitScanner
 from schemas.test_result_schemas import TestResultCreate
 from schemas.scan_schemas import ScanRequest, ScanResponse
+from services.report_storage import upload_scan_report
 
 
 class ScanService:
@@ -27,7 +28,12 @@ class ScanService:
     """
 
     @staticmethod
-    def run_scan(db: Session, user_id: int, scan_request: ScanRequest) -> ScanResponse:
+    def run_scan(
+        db: Session,
+        user_id: int,
+        scan_request: ScanRequest,
+        scan_id: int | None = None,
+    ) -> ScanResponse:
         """
         Execute security scan with selected tests
 
@@ -39,11 +45,38 @@ class ScanService:
         Returns:
             ScanResponse: Scan results with all test outcomes
         """
-        scan = ScanRepository.create_scan(
-            db=db,
-            user_id=user_id,
-            target_url=str(scan_request.target_url),
-        )
+        if scan_id is None:
+            scan = ScanRepository.create_scan(
+                db=db,
+                user_id=user_id,
+                target_url=str(scan_request.target_url),
+            )
+        else:
+            scan = ScanRepository.get_by_id(db, scan_id)
+            if scan is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Scan not found",
+                )
+            if scan.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to execute this scan",
+                )
+            if scan.target_url != str(scan_request.target_url):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Scan target does not match request",
+                )
+
+        if scan_id is not None:
+            TestResultRepository.delete_by_scan(
+                db, scan.id, commit=False
+            )
+
+        scan.status = "running"
+        db.commit()
+        db.refresh(scan)
 
         scanner_mapping: dict[TestType, type[BaseScanner]] = {
             TestType.RATE_LIMIT: RateLimitScanner,
@@ -97,6 +130,25 @@ class ScanService:
                 recommendations_json=result.recommendations_json,
             )
 
+        db.expire(scan, ["test_results"])
+        report_scan = ScanRepository.get_by_id(db, scan.id)
+
+        if report_scan is None:
+            raise RuntimeError("Scan record not found for report generation")
+
+        report_data = ScanResponse.model_validate(
+            report_scan
+        ).model_dump(mode="json")
+        report_data["status"] = "completed"
+
+        upload_scan_report(
+            scan_id=scan.id,
+            user_id=user_id,
+            report=report_data,
+        )
+
+        scan.status = "completed"
+        db.commit()
         db.refresh(scan)
 
         return ScanResponse.model_validate(scan)

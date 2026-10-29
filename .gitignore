@@ -45,3 +45,10 @@ htmlcov/
 
 # OS
 Thumbs.db
+
+# Local package caches and deployment backups
+.pnpm-store/
+frontend/.pnpm-store/
+*.save
+*.ec2-backup
+*.option-b-backup
